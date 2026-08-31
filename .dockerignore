@@ -1,0 +1,38 @@
+# 버전 관리 및 개발 도구
+.git/
+.github/
+.agents/
+.codex/
+.vscode/
+
+# 로컬 Python 환경과 캐시
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 테스트 및 문서 산출물
+tests/
+docs/
+.coverage
+coverage.xml
+htmlcov/
+
+# 로컬 환경 변수와 로그
+.env
+.env.*
+!.env.example
+*.log
+*.pem
+*.key
+
+# 빌드 산출물과 Registry 임시 파일
+build/
+dist/
+*.egg-info/
+config/*.tmp
+config/.*.tmp

@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta
+      name="description"
+      content="LPL API의 Deployment, Detect, Mask, Generate, Title 기능을 확인하는 내부 테스트 화면"
+    >
+    <title>LPL API Test Console</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">LOCAL PRIVATE LLM</p>
+        <h1>LPL API Test Console</h1>
+        <p class="header-copy">NER·LLM Deployment와 실행 API를 한 화면에서 점검합니다.</p>
+      </div>
+      <div class="header-actions">
+        <span id="global-status" class="status-pill" data-tone="idle" role="status">
+          준비 중
+        </span>
+        <button id="refresh-all" class="button secondary" type="button">목록 새로고침</button>
+      </div>
+    </header>
+
+    <nav class="tab-list" aria-label="테스트 기능 선택">
+      <button class="tab-button active" type="button" data-tab-target="deployments" aria-selected="true">
+        Deployments
+      </button>
+      <button class="tab-button" type="button" data-tab-target="detect" aria-selected="false">
+        Detect
+      </button>
+      <button class="tab-button" type="button" data-tab-target="mask" aria-selected="false">
+        Mask
+      </button>
+      <button class="tab-button" type="button" data-tab-target="generate" aria-selected="false">
+        Generate
+      </button>
+      <button class="tab-button" type="button" data-tab-target="title" aria-selected="false">
+        Title 요약
+      </button>
+    </nav>
+
+    <main class="workspace">
+      <section id="panel-deployments" class="tab-panel active" data-tab-panel="deployments">
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Registry management</p>
+            <h2>NER · LLM Deployment 관리</h2>
+          </div>
+          <div class="segmented-control" aria-label="Deployment 종류">
+            <button class="active" type="button" data-deployment-kind="ner" aria-pressed="true">NER</button>
+            <button type="button" data-deployment-kind="llm" aria-pressed="false">LLM</button>
+          </div>
+        </div>
+
+        <div class="deployment-layout">
+          <aside class="card catalog-card" aria-labelledby="deployment-catalog-title">
+            <div class="card-heading compact">
+              <div>
+                <p class="section-kicker">Active snapshot</p>
+                <h3 id="deployment-catalog-title">등록된 Deployment</h3>
+              </div>
+              <button id="new-deployment" class="button ghost small" type="button">새로 추가</button>
+            </div>
+            <p id="deployment-list-empty" class="empty-copy">목록을 불러오는 중입니다.</p>
+            <ul id="deployment-list" class="deployment-list" aria-label="Deployment 목록"></ul>
+          </aside>
+
+          <section class="card form-card" aria-labelledby="deployment-form-title">
+            <div class="card-heading">
+              <div>
+                <p id="deployment-mode-label" class="section-kicker">Create</p>
+                <h3 id="deployment-form-title">Deployment 추가</h3>
+              </div>
+              <span id="deployment-kind-badge" class="kind-badge">NER</span>
+            </div>
+
+            <form id="deployment-form" class="form-grid" novalidate>
+              <label class="field span-2">
+                <span>Deployment ID <strong aria-hidden="true">*</strong></span>
+                <input id="deployment-id" name="deploymentId" autocomplete="off" required placeholder="ner-local-a">
+              </label>
+
+              <label id="deployment-adapter-field" class="field" hidden>
+                <span>Adapter <strong aria-hidden="true">*</strong></span>
+                <select id="deployment-adapter" name="adapterType" required>
+                  <option value="">Adapter 선택</option>
+                </select>
+              </label>
+
+              <label class="toggle-field">
+                <input id="deployment-enabled" name="enabled" type="checkbox">
+                <span>
+                  <strong>Runtime 활성화</strong>
+                  <small>안전한 등록 테스트는 비활성 상태로 먼저 저장하세요.</small>
+                </span>
+              </label>
+
+              <label class="field span-2">
+                <span id="deployment-base-url-label">NER Endpoint URL</span>
+                <input id="deployment-base-url" name="baseUrl" type="url" autocomplete="url" placeholder="http://ner-server:8008/v1/ner/detect">
+              </label>
+
+              <label id="deployment-model-name-field" class="field" hidden>
+                <span>Model Name</span>
+                <input id="deployment-model-name" name="modelName" autocomplete="off" placeholder="qwen3:8b">
+              </label>
+
+              <label class="field">
+                <span>Timeout (ms)</span>
+                <input id="deployment-timeout" name="timeoutMs" type="number" min="1" step="1" inputmode="numeric" placeholder="5000">
+              </label>
+
+              <div class="form-actions span-2">
+                <button id="save-deployment" class="button primary" type="submit">Deployment 추가</button>
+                <button id="probe-deployment" class="button secondary" type="button" disabled>선택 항목 Probe</button>
+                <button id="reset-deployment" class="button ghost" type="button">입력 초기화</button>
+              </div>
+            </form>
+
+            <div class="result-block">
+              <div class="result-heading">
+                <h4>Deployment API 응답</h4>
+                <span id="deployment-status" class="inline-status" role="status">대기</span>
+              </div>
+              <pre id="deployment-output" class="result-output" tabindex="0">응답이 여기에 표시됩니다.</pre>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="panel-detect" class="tab-panel" data-tab-panel="detect" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">NER → Local LLM</p>
+            <h2>민감정보 Detect 테스트</h2>
+            <p>NER 탐지 후 LLM 추가 탐지까지 전체 파이프라인을 실행합니다.</p>
+          </div>
+        </div>
+        <div class="runner-layout">
+          <form id="detect-form" class="card form-card form-grid" novalidate>
+            <label class="field">
+              <span>NER Deployment <strong aria-hidden="true">*</strong></span>
+              <select id="detect-ner-id" required><option value="">NER 선택</option></select>
+            </label>
+            <label class="field">
+              <span>LLM Deployment <strong aria-hidden="true">*</strong></span>
+              <select id="detect-llm-id" required><option value="">LLM 선택</option></select>
+            </label>
+            <label class="field span-2">
+              <span>원문 <strong aria-hidden="true">*</strong></span>
+              <textarea id="detect-text" rows="8" required placeholder="홍길동은 내부 프로젝트 알파의 계약 금액을 담당합니다."></textarea>
+            </label>
+            <label class="field span-2">
+              <span>조직 프로필 (선택, JSON object)</span>
+              <textarea id="detect-organization-profile" rows="8" spellcheck="false" placeholder="비워 두면 organizationProfile: null로 전송합니다."></textarea>
+            </label>
+            <label class="field">
+              <span>텍스트 출처 <strong aria-hidden="true">*</strong></span>
+              <select id="detect-source-type" required>
+                <option value="CHAT_TEXT">CHAT_TEXT</option>
+                <option value="OCR_TEXT">OCR_TEXT</option>
+              </select>
+            </label>
+            <label class="field span-2">
+              <span>미확정 Regex 후보 (JSON array)</span>
+              <textarea id="detect-regex-candidates" rows="5" spellcheck="false">[]</textarea>
+            </label>
+            <div class="form-actions span-2">
+              <button class="button primary" type="submit">Detect 실행</button>
+            </div>
+          </form>
+          <section class="card result-card" aria-labelledby="detect-result-title">
+            <div class="result-heading">
+              <h3 id="detect-result-title">Detect 응답</h3>
+              <span id="detect-status" class="inline-status" role="status">대기</span>
+            </div>
+            <pre id="detect-output" class="result-output tall" tabindex="0">응답이 여기에 표시됩니다.</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="panel-mask" class="tab-panel" data-tab-panel="mask" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Local LLM masking</p>
+            <h2>민감정보 Mask 테스트</h2>
+            <p>원문과 전체 탐지 결과를 선택한 로컬 LLM에 전달해 마스킹합니다.</p>
+          </div>
+        </div>
+        <div class="runner-layout">
+          <form id="mask-form" class="card form-card form-grid" novalidate>
+            <label class="field span-2">
+              <span>LLM Deployment <strong aria-hidden="true">*</strong></span>
+              <select id="mask-llm-id" required><option value="">LLM 선택</option></select>
+            </label>
+            <label class="field span-2">
+              <span>원문 <strong aria-hidden="true">*</strong></span>
+              <textarea id="mask-text" rows="8" required placeholder="홍길동은 내부 프로젝트 알파를 담당합니다."></textarea>
+            </label>
+            <label class="field span-2">
+              <span>전체 탐지 결과 (JSON array)</span>
+              <textarea id="mask-detections" rows="7" spellcheck="false">[]</textarea>
+            </label>
+            <div class="form-actions span-2">
+              <button class="button primary" type="submit">Mask 실행</button>
+            </div>
+          </form>
+          <section class="card result-card" aria-labelledby="mask-result-title">
+            <div class="result-heading">
+              <h3 id="mask-result-title">Mask 응답</h3>
+              <span id="mask-status" class="inline-status" role="status">대기</span>
+            </div>
+            <pre id="mask-output" class="result-output tall" tabindex="0">응답이 여기에 표시됩니다.</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="panel-generate" class="tab-panel" data-tab-panel="generate" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Option A</p>
+            <h2>Local LLM Generate 테스트</h2>
+            <p>사용자 원문을 선택한 로컬 LLM에 그대로 전달합니다.</p>
+          </div>
+        </div>
+        <div class="runner-layout">
+          <form id="generate-form" class="card form-card form-grid" novalidate>
+            <label class="field span-2">
+              <span>LLM Deployment <strong aria-hidden="true">*</strong></span>
+              <select id="generate-llm-id" required><option value="">LLM 선택</option></select>
+            </label>
+            <label class="field span-2">
+              <span>이전 대화 메시지 배열 (선택)</span>
+              <textarea id="generate-previous-text" rows="8" placeholder='[{"role":"user","content":"이전 질문"},{"role":"assistant","content":"이전 답변"}]'></textarea>
+            </label>
+            <label class="field span-2">
+              <span>사용자 입력 <strong aria-hidden="true">*</strong></span>
+              <textarea id="generate-text" rows="10" required placeholder="이 내용을 요약해 주세요."></textarea>
+            </label>
+            <div class="form-actions span-2">
+              <button class="button primary" type="submit">Generate 실행</button>
+            </div>
+          </form>
+          <section class="card result-card" aria-labelledby="generate-result-title">
+            <div class="result-heading">
+              <h3 id="generate-result-title">Generate 응답</h3>
+              <span id="generate-status" class="inline-status" role="status">대기</span>
+            </div>
+            <pre id="generate-output" class="result-output tall" tabindex="0">응답이 여기에 표시됩니다.</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="panel-title" class="tab-panel" data-tab-panel="title" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="section-kicker">Conversation metadata</p>
+            <h2>LLM 대화 제목 요약 테스트</h2>
+            <p>첫 사용자 메시지로 한 줄 대화 제목을 생성합니다.</p>
+          </div>
+        </div>
+        <div class="runner-layout">
+          <form id="title-form" class="card form-card form-grid" novalidate>
+            <label class="field span-2">
+              <span>LLM Deployment <strong aria-hidden="true">*</strong></span>
+              <select id="title-llm-id" required><option value="">LLM 선택</option></select>
+            </label>
+            <label class="field span-2">
+              <span>첫 사용자 메시지 <strong aria-hidden="true">*</strong></span>
+              <textarea id="title-text" rows="10" required placeholder="사내 개인정보 처리 정책을 간단히 정리해 주세요."></textarea>
+            </label>
+            <div class="form-actions span-2">
+              <button class="button primary" type="submit">Title 생성</button>
+            </div>
+          </form>
+          <section class="card result-card" aria-labelledby="title-result-title">
+            <div class="result-heading">
+              <h3 id="title-result-title">Title 응답</h3>
+              <span id="title-status" class="inline-status" role="status">대기</span>
+            </div>
+            <pre id="title-output" class="result-output tall" tabindex="0">응답이 여기에 표시됩니다.</pre>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      내부 기능 테스트 전용 · 인증과 사용자 권한은 Gateway에서 처리해야 합니다.
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,69 @@
+다음 원문에서 Gateway의 Regex 후보와 NER 후보를 판정하고, 두 후보군이 놓친 개인정보, 민감정보와 문맥형 기업 기밀정보를 추가로 탐지하세요.
+탐지 Context JSON의 organizationProfile을 사용해 공개된 기업 정보와 조직에 특화된 비공개 정보를 구분하세요.
+organizationProfile이 null이면 조직 기준정보가 제공되지 않은 것입니다. 조직별 공개 여부나 내부 자산 여부가 필요한 판단을 임의로 확정하지 말고, 원문만으로도 명백하지 않으면 UNCERTAIN으로 판정하세요.
+sourceType을 사용해 사용자가 직접 입력한 채팅 텍스트인지 Gateway가 OCR로 추출한 텍스트인지 구분하세요.
+sourceType이 OCR_TEXT이면 OCR 오류와 비표준 문자·구분자 가능성을 고려하되 입력에 없는 값을 추측해 만들지 마세요.
+organizationProfile.publicContext에 등록된 도메인과 명칭은 등록된 공개 범위 안에서 이름 자체만으로 기밀로 판단하지 마세요.
+organizationProfile이 존재하면 다음 등록값 우선 규칙을 일반적인 추론보다 먼저 적용하세요.
+- privacy.personNameScope=false이면 사람 이름 자체를 PERSONAL_IDENTITY로 확정하지 마세요.
+- privacy.persons가 비어 있지 않으면 해당 name과 aliases에 정확히 일치하는 인명만 PERSONAL_IDENTITY로 확정하고, 목록에 없는 인명은 출력하지 마세요.
+- securityContext의 internalIpRanges, internalDomains, internalSystems의 name·aliases, cloudAssets와 securityAssets에 일치하는 값은 반드시 SECURITY_INFRA로 탐지하세요.
+- publicContext에 등록되지 않았다는 이유만으로 임의의 IP, 도메인, 시스템명을 내부정보로 확정하지 마세요. securityContext 등록값에 일치하지 않으면 형식만으로 newDetections에 출력하지 마세요.
+- confidentialTechnologyContext.assets의 name과 aliases에 일치하는 값은 반드시 R&D로 탐지하세요.
+- thirdPartyContext.entities의 name과 aliases는 relationshipPublic과 hasConfidentialInformation을 함께 확인하고, 비공개 관계 또는 기밀정보가 존재하면 반드시 CLIENT 정책으로 판단하세요.
+공개 여부를 organizationProfile과 sourceType으로도 판단할 수 없으면 UNCERTAIN으로 판정하세요.
+각 후보는 주변 문맥과 활성 정책을 근거로 반드시 다음 중 하나로 판정하세요.
+- "CONFIRMED": 실제 보호 대상임이 충분히 확인됨
+- "REJECTED": 공개 정보, 예시·placeholder, 오탐 등으로 보호 대상이 아님
+- "UNCERTAIN": 현재 원문과 Context만으로 공개 여부나 보호 대상 여부를 확정할 수 없음
+후보가 제공되었다는 이유만으로 CONFIRMED로 판정하지 마세요.
+모든 regexCandidates와 nerCandidates의 candidateId를 정확히 한 번씩 candidateDecisions에 출력하세요.
+입력에 없는 candidateId를 만들거나 candidateId의 원문, 좌표, 정책을 수정하지 마세요.
+candidateDecisions 항목은 정확히 "candidateId", "decision" 두 필드만 포함하세요.
+후보에 이미 있는 대상을 newDetections에 다시 출력하지 마세요.
+특히 candidate의 text와 type이 동일한 항목을 newDetections에 복제하지 마세요.
+응답은 설명이나 Markdown 코드 블록 없이 정확히 다음 형태의 순수 JSON 객체여야 합니다.
+{"candidateDecisions":[],"newDetections":[]}
+newDetections의 각 항목은 정확히 다음 세 필드만 포함하세요.
+- "text": 원문에 실제로 존재하는 탐지 문자열 전체
+- "text"는 original_text에서 연속된 문자열을 문자 단위로 그대로 복사하세요.
+  조사, 띄어쓰기, 문장부호, 따옴표와 숫자 형식을 삭제·추가·정규화하거나 요약하지 마세요.
+  예를 들어 원문이 "대출 잔액은 1억 2천만 원"이면
+  "대출 잔액 1억 2천만 원"처럼 조사 "은"을 빼서 출력하면 안 됩니다.
+- "type": 아래 정책 카탈로그 중 활성화된 코드 하나
+  - "PERSONAL_IDENTITY" (P01): 개인 신원 정보
+  - "UNIQUE_IDENTITY" (P02): 고유식별번호
+  - "CONTACT" (P03): 연락처
+  - "LOCATION" (P04): 주소·정밀 위치
+  - "PAYMENT" (P05): 결제 정보
+  - "FINANCE_ACCOUNT" (P06): 금융계좌정보
+  - "PERSONAL_FINANCE" (P07): 개인 금융·경제정보
+  - "SENSITIVE_PERSONAL" (P08): 민감 개인정보
+  - "AUTH" (S01): 인증정보·Secret
+  - "SECURITY_INFRA" (S02): 보안·인프라 정보
+  - "SYSTEM_LOG" (S03): 시스템 접근·운영 로그
+  - "PERSONAL" (B01): 인사·인력 운영정보
+  - "CLIENT" (B02): 고객·협력사 기밀정보
+  - "R&D" (B03): R&D·영업비밀·기술정보
+- "score": 0.0 이상 1.0 이하의 신뢰 점수
+문자 위치나 인덱스를 계산하거나 출력하지 마세요.
+LPL이 text와 일치하는 원문 위치를 찾아 start, end와 source="llm"을 설정합니다.
+동일한 text와 type 조합을 newDetections에 중복 출력하지 마세요.
+policyId는 출력하지 마세요. LPL이 type에 고정된 policyId를 설정합니다.
+탐지 Context JSON의 enabledPolicies에 없는 type은 절대 출력하지 마세요.
+PERSONAL_IDENTITY와 LOCATION은 NER가 놓친 개체만 보완하세요.
+UNIQUE_IDENTITY, CONTACT, PAYMENT는 Regex가 놓친 비표준 형식만 보완하세요.
+그 밖의 문맥형 type은 text가 원문에서 정확히 한 번만 나타나도록 충분한 주변 문맥을 포함하세요.
+문맥형 text가 원문에서 여러 번 나타나면 LPL이 전체 출력을 거부합니다.
+다른 필드를 추가하지 마세요.
+허용 목록에 없는 type을 만들거나 유사한 이름으로 바꾸지 마세요.
+입력 후보가 없으면 candidateDecisions는 []로 출력하세요.
+추가 탐지 결과가 없으면 newDetections는 []로 출력하세요.
+원문:
+<original_text>
+{{ text }}
+</original_text>
+활성 정책과 기존 탐지 결과 Context(JSON):
+<detection_context_json>
+{{ existing_detections }}
+</detection_context_json>
